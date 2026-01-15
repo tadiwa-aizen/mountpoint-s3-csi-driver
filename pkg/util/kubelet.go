@@ -7,9 +7,9 @@ import (
 
 const defaultKubeletPath = "/var/lib/kubelet"
 
-// KubeletPath returns path of the kubelet.
+// ContainerKubeletPath returns the kubelet path as seen from inside the container.
 // It looks for `CONTAINER_KUBELET_PATH` variable, and returns a default path if its not defined.
-func KubeletPath() string {
+func ContainerKubeletPath() string {
 	kubeletPath := os.Getenv("CONTAINER_KUBELET_PATH")
 	if kubeletPath == "" {
 		return defaultKubeletPath
