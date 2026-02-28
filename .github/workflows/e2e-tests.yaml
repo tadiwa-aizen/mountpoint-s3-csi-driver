@@ -71,6 +71,7 @@ jobs:
           make -j `nproc` all-push-skip-if-present
   test:
     needs: ["build", "build_matrix"]
+    timeout-minutes: 540
     strategy:
       # Failing fast causes some resources created during the test to leak,
       # so we disable it to ensure all resources created during test are properly cleaned up.
