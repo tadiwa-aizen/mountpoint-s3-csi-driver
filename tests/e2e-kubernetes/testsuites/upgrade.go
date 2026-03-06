@@ -355,6 +355,7 @@ func buildHelmValues() map[string]any {
 				"enable": "true",
 			},
 		},
+		"supportLegacySystemDMounts": false,	
 	}
 	if helmChartContainerRepository != "" && helmChartContainerTag != "" {
 		values["image"] = map[string]any{
