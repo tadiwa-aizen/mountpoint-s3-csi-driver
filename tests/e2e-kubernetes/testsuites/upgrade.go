@@ -253,66 +253,45 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 		// Test Set B workloads
 		framework.Logf("Testing Set B workloads...")
-		_, _, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetB)
 		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetB, testFile, testWriteSize, seed)
 
-		// Declare Set C, D variables
-		var fullAccessPodsSetC, fullAccessPodsSetD []*v1.Pod
-		var readOnlyAccessPodsSetC, readOnlyAccessPodsSetD []*v1.Pod
-
-		// Run upgrade phase and capture success/failure
-		upgradeSucceeded := true
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					upgradeSucceeded = false
-					framework.Logf("Upgrade phase failed with panic: %v", r)
-				}
-			}()
-
-			// Upgrade to the new version
-			if useSourceBuild {
-				chartPath = packageHelmChartFromSource(toVersion)
-			} else {
-				chartPath = pullCSIDriver(settings, cfg, toVersion)
-			}
-			upgradeCSIDriver(cfg, f, toVersion, chartPath)
-
-			// Create Set C + Set D after the upgrade
-			framework.Logf("Creating Set C and Set D workloads after upgrade...")
-			fullAccessPodsSetC, readOnlyAccessPodsSetC = createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
-			fullAccessPodsSetD, readOnlyAccessPodsSetD = createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
-
-			// Test Set C workloads
-			framework.Logf("Testing Set C workloads...")
-			_, _, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
-			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
-
-			// Test Set D workloads
-			framework.Logf("Testing Set D workloads...")
-			_, _, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
-			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
-
-			// Ensure all workloads are still healthy for 150 minutes
-			framework.Logf("Monitoring all 12 workloads (Set A + B + C + D) for %d minutes...", UPGRADE_TEST_DURATION_IN_MINUTES)
-			allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
-			allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
-
-			monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade")
-
-			// Terminate Set B + Set C (test termination after upgrade)
-			framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
-			for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
-				e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
-			}
-			framework.Logf("Set B and Set C terminated successfully. Set A and Set D remain running.")
-		}()
-
-		// Check upgrade outcome and stop if it failed
-		if !upgradeSucceeded {
-			framework.Failf("Upgrade phase failed, cannot test rollback")
-			return
+		// Upgrade to the new version
+		if useSourceBuild {
+			chartPath = packageHelmChartFromSource(toVersion)
+		} else {
+			chartPath = pullCSIDriver(settings, cfg, toVersion)
 		}
+		upgradeCSIDriver(cfg, f, toVersion, chartPath)
+
+		// Create Set C + Set D after the upgrade
+		framework.Logf("Creating Set C and Set D workloads after upgrade...")
+		fullAccessPodsSetC, readOnlyAccessPodsSetC := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+		fullAccessPodsSetD, readOnlyAccessPodsSetD := createTestWorkloads(ctx, pliFullAccessSA, pliReadOnlyAccessSA)
+
+		// Test Set C workloads
+		framework.Logf("Testing Set C workloads...")
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetC)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetC, testFile, testWriteSize, seed)
+
+		// Test Set D workloads
+		framework.Logf("Testing Set D workloads...")
+		testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetD)
+		verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetD, testFile, testWriteSize, seed)
+
+		// Ensure all workloads are still healthy for 150 minutes
+		framework.Logf("Monitoring all 12 workloads (Set A + B + C + D) for %d minutes...", UPGRADE_TEST_DURATION_IN_MINUTES)
+		allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
+		allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
+
+		monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade")
+
+		// Terminate Set B + Set C (test termination after upgrade)
+		framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
+		for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
+			e2epod.DeletePodWithWait(ctx, f.ClientSet, pod)
+		}
+		framework.Logf("Set B and Set C terminated successfully. Set A and Set D remain running.")
 
 		framework.Logf("Upgrade phase completed successfully, proceeding to rollback test...")
 
@@ -337,7 +316,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			// Test Set E workloads
 			framework.Logf("Testing Set E workloads...")
-			_, _, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
+			testFile, testWriteSize, seed = writeAndVerifyTestFile(ctx, fullAccessPodsSetE)
 			verifyReadOnlyAccess(ctx, readOnlyAccessPodsSetE, testFile, testWriteSize, seed)
 
 			// Monitor Set A + D + E for 150 minutes after rollback
