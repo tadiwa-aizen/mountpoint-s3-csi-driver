@@ -37,8 +37,8 @@ import (
 //
 // So, to make sure we hit both of the cycles in the worst case, we want to run our upgrade tests for 2 hours+.
 // Therefore we can be sure if the credentials are successfully refreshed after the upgrade.
-const UPGRADE_TEST_DURATION_IN_MINUTES = 150
-const ROLLBACK_TEST_DURATION_IN_MINUTES = 150
+const UPGRADE_TEST_DURATION_IN_MINUTES = 70
+const ROLLBACK_TEST_DURATION_IN_MINUTES = 70
 
 const helmRepo = "https://awslabs.github.io/mountpoint-s3-csi-driver"
 const helmChartSource = "../../charts/aws-mountpoint-s3-csi-driver"
