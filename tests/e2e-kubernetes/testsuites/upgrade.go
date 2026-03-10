@@ -300,7 +300,6 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 
 			monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade")
 
-
 			// Terminate Set B + Set C (test termination after upgrade)
 			framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
 			for _, pod := range slices.Concat(fullAccessPodsSetB, readOnlyAccessPodsSetB, fullAccessPodsSetC, readOnlyAccessPodsSetC) {
@@ -348,7 +347,6 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
 
 			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback")
-
 
 			// Terminate Set A + D + E (test termination after rollback)
 			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
