@@ -297,18 +297,9 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			framework.Logf("Monitoring all 12 workloads (Set A + B + C + D) for %d minutes...", UPGRADE_TEST_DURATION_IN_MINUTES)
 			allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
 			allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
-			
-			endTime := time.Now().Add(UPGRADE_TEST_DURATION_IN_MINUTES * time.Minute)
-			for time.Now().Before(endTime) {
-				framework.Logf("Checking if workloads are still healthy after the upgrade...")
-				verifyWorkloadHealth(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed)
-				
-				if remaining := time.Until(endTime); remaining > time.Minute {
-					time.Sleep(time.Minute)
-				} else if remaining > 0 {
-					time.Sleep(remaining)
-				}
-			}
+
+			monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade")
+
 
 			// Terminate Set B + Set C (test termination after upgrade)
 			framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
@@ -356,17 +347,8 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetD, fullAccessPodsSetE)
 			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
 
-			endTime := time.Now().Add(ROLLBACK_TEST_DURATION_IN_MINUTES * time.Minute)
-			for time.Now().Before(endTime) {
-				framework.Logf("Checking if workloads are still healthy after rollback...")
-				verifyWorkloadHealth(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed)
-				
-				if remaining := time.Until(endTime); remaining > time.Minute {
-					time.Sleep(time.Minute)
-				} else if remaining > 0 {
-					time.Sleep(remaining)
-				}
-			}
+			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback")
+
 
 			// Terminate Set A + D + E (test termination after rollback)
 			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
@@ -565,6 +547,30 @@ func installCSIDriver(cfg *action.Configuration, version string, chartPath strin
 	framework.ExpectNoError(err)
 
 	framework.Logf("Helm release %q created", release.Name)
+}
+
+// monitorWorkloadsForDuration monitors workload health for a specified duration, checking every minute and logging progress.
+func monitorWorkloadsForDuration(
+	ctx context.Context,
+	fullAccessPods []*v1.Pod,
+	readOnlyPods []*v1.Pod,
+	testFile string,
+	testWriteSize int64,
+	seed int64,
+	duration time.Duration,
+	phase string,
+) {
+	endTime := time.Now().Add(duration)
+	for time.Now().Before(endTime) {
+		framework.Logf("Checking if workloads are still healthy after %s...", phase)
+		verifyWorkloadHealth(ctx, fullAccessPods, readOnlyPods, testFile, testWriteSize, seed)
+
+		if remaining := time.Until(endTime); remaining > time.Minute {
+			time.Sleep(time.Minute)
+		} else if remaining > 0 {
+			time.Sleep(remaining)
+		}
+	}
 }
 
 // upgradeCSIDriver upgrades the CSI Driver's Helm chart to the new version.
