@@ -284,7 +284,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 		allFullAccessAfterUpgrade := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetB, fullAccessPodsSetC, fullAccessPodsSetD)
 		allReadOnlyAfterUpgrade := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetB, readOnlyAccessPodsSetC, readOnlyAccessPodsSetD)
 
-		monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade")
+		monitorWorkloadsForDuration(ctx, allFullAccessAfterUpgrade, allReadOnlyAfterUpgrade, testFile, testWriteSize, seed, UPGRADE_TEST_DURATION_IN_MINUTES*time.Minute, "upgrade", verifyWorkloadHealth)
 
 		// Terminate Set B + Set C (test termination after upgrade)
 		framework.Logf("Terminating Set B and Set C workloads to test termination after upgrade...")
@@ -325,7 +325,7 @@ func (t *s3CSIUpgradeTestSuite) DefineTests(driver storageframework.TestDriver, 
 			allFullAccessAfterRollback := slices.Concat(fullAccessPodsSetA, fullAccessPodsSetD, fullAccessPodsSetE)
 			allReadOnlyAfterRollback := slices.Concat(readOnlyAccessPodsSetA, readOnlyAccessPodsSetD, readOnlyAccessPodsSetE)
 
-			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback")
+			monitorWorkloadsForDuration(ctx, allFullAccessAfterRollback, allReadOnlyAfterRollback, testFile, testWriteSize, seed, ROLLBACK_TEST_DURATION_IN_MINUTES*time.Minute, "rollback", verifyWorkloadHealth)
 
 			// Terminate Set A + D + E (test termination after rollback)
 			framework.Logf("Terminating Set A, Set D, and Set E workloads to test termination after rollback...")
@@ -532,15 +532,16 @@ func monitorWorkloadsForDuration(
 	fullAccessPods []*v1.Pod,
 	readOnlyPods []*v1.Pod,
 	testFile string,
-	testWriteSize int64,
+	testWriteSize int,
 	seed int64,
 	duration time.Duration,
 	phase string,
+	verifyFunc func(context.Context, []*v1.Pod, []*v1.Pod, string, int, int64),
 ) {
 	endTime := time.Now().Add(duration)
 	for time.Now().Before(endTime) {
 		framework.Logf("Checking if workloads are still healthy after %s...", phase)
-		verifyWorkloadHealth(ctx, fullAccessPods, readOnlyPods, testFile, testWriteSize, seed)
+		verifyFunc(ctx, fullAccessPods, readOnlyPods, testFile, testWriteSize, seed)
 
 		if remaining := time.Until(endTime); remaining > time.Minute {
 			time.Sleep(time.Minute)
