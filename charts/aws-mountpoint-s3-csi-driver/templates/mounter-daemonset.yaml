@@ -1,15 +1,19 @@
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
-{{- if ne (len .Values.daemonsetMounters) 1 }}
-{{- fail "daemonsetMounters must have exactly one entry" }}
+{{- include "s3.validateMounters" . }}
+{{- $root := . }}
+{{- range $idx, $mounter := .Values.daemonsetMounters }}
+{{- $suffix := "" }}
+{{- if not (empty $mounter.nodeSelectorValue) }}
+{{-   $suffix = printf "-%s" (include "s3.mounterNameSuffix" (dict "value" $mounter.nodeSelectorValue)) }}
 {{- end }}
-{{- $mounter := index .Values.daemonsetMounters 0 }}
+---
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: s3-csi-daemonset-mounter
-  namespace: {{ .Release.Namespace }}
+  name: {{ printf "s3-csi-daemonset-mounter%s" $suffix | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $root.Release.Namespace }}
   labels:
-    {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
+    {{- include "aws-mountpoint-s3-csi-driver.labels" $root | nindent 4 }}
 spec:
   updateStrategy:
     # We use OnDelete strategy because restarting this pod disrupts ALL active mounts on the node.
@@ -18,12 +22,14 @@ spec:
   selector:
     matchLabels:
       app: s3-csi-daemonset-mounter
-      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" . | nindent 6 }}
+      s3.csi.aws.com/mounter-class: {{ $mounter.nodeSelectorValue | default "default" | quote }}
+      {{- include "aws-mountpoint-s3-csi-driver.selectorLabels" $root | nindent 6 }}
   template:
     metadata:
       labels:
         app: s3-csi-daemonset-mounter
-        {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 8 }}
+        s3.csi.aws.com/mounter-class: {{ $mounter.nodeSelectorValue | default "default" | quote }}
+        {{- include "aws-mountpoint-s3-csi-driver.labels" $root | nindent 8 }}
         {{- with $mounter.podLabels }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -36,17 +42,22 @@ spec:
       automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/os: linux
-        {{- with .Values.node.nodeSelector }}
+        {{- with $root.Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        {{- if not (empty $mounter.nodeSelectorValue) }}
+        {{ $root.Values.daemonsetMounterLabelKey }}: {{ $mounter.nodeSelectorValue | quote }}
+        {{- end }}
       priorityClassName: system-node-critical
-      {{- with $mounter.affinity }}
-      affinity: {{- toYaml . | nindent 8 }}
+      {{- $mounterAff := include "s3.mounterAffinity" (dict "root" $root "mounter" $mounter) }}
+      {{- if $mounterAff | trim }}
+      affinity:
+        {{- $mounterAff | nindent 8 }}
       {{- end }}
       tolerations:
-        {{- if $mounter.tolerateAllTaints | default .Values.node.tolerateAllTaints }}
+        {{- if $mounter.tolerateAllTaints | default $root.Values.node.tolerateAllTaints }}
         - operator: Exists
-        {{- else if $mounter.defaultTolerations | default .Values.node.defaultTolerations }}
+        {{- else if $mounter.defaultTolerations | default $root.Values.node.defaultTolerations }}
         - key: CriticalAddonsOnly
           operator: Exists
         - key: s3.csi.aws.com/agent-not-ready
@@ -66,8 +77,8 @@ spec:
       {{- end }}
       containers:
       - name: mounter
-        image: {{ include "csiDriverImageName" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        image: {{ include "csiDriverImageName" $root }}
+        imagePullPolicy: {{ $root.Values.image.pullPolicy }}
         command:
           - /bin/aws-s3-csi-daemonset-mounter
         args:
@@ -93,4 +104,5 @@ spec:
       volumes:
       - name: comm
         emptyDir: {}
+{{- end }}
 {{- end }}

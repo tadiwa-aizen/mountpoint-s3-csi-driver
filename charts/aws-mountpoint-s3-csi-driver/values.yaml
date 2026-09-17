@@ -154,15 +154,27 @@ experimental:
   # one mountpoint pod per workload in pod mode.
   mounterMode: "daemonset"
 
+# Node label key used to distinguish mounter classes for heterogeneous config.
+# Each daemonsetMounters[].nodeSelectorValue is matched against this label.
+# Defaults to instance type; can be any node label (e.g. a custom mounter-profile label).
+daemonsetMounterLabelKey: node.kubernetes.io/instance-type
+
 # WARNING: daemonset mode implementation is not complete - it is only exposed to allow testing.
 # Configuration for the secondary mounter daemonset(s).
 # Only used when experimental.mounterMode is "daemonset".
+# For heterogeneous config, add one entry per node type, each with a nodeSelectorValue
+# (the value of daemonsetMounterLabelKey for that node type). A single entry with no
+# nodeSelectorValue is the homogeneous/default case.
 daemonsetMounters:
+    # nodeSelectorValue: the value of daemonsetMounterLabelKey this entry targets
+    # (required when more than one entry is defined; omit for the single/default entry).
+    # nodeSelectorValue: m5.large
+    #
     # Maximum number of distinct S3 volumes (Mountpoint processes) per node.
     # Advertised to the Kubernetes scheduler via MaxVolumesPerNode.
     # Set to 0 to disable the limit (unbounded); this risks resource exhaustion
     # (memory OOM, or disk exhaustion with cache) on the mounter DaemonSet pod.
-    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to 
+    # IMPORTANT: volumeHandle must be unique per PV as the scheduler uses it to
     # track volume usage.
   - maxVolumesPerNode: 4
     # Total resource requests and limits for the mounter DaemonSet pod.

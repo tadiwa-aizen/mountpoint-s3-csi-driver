@@ -18,10 +18,12 @@ package driver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -62,12 +64,15 @@ const (
 )
 
 var (
-	mountpointPodNamespace   = os.Getenv("MOUNTPOINT_NAMESPACE")
-	mounterMode              = os.Getenv("MOUNTER_MODE")
-	mounterModeDaemonset     = "daemonset"
-	maxVolumesPerNodeEnvName = "MAX_VOLUMES_PER_NODE"
-	podWatcherResyncPeriod   = time.Minute
-	scheme                   = runtime.NewScheme()
+	mountpointPodNamespace          = os.Getenv("MOUNTPOINT_NAMESPACE")
+	mounterMode                     = os.Getenv("MOUNTER_MODE")
+	mounterModeDaemonset            = "daemonset"
+	maxVolumesPerNodeEnvName        = "MAX_VOLUMES_PER_NODE"           // scalar fallback (single-entry/homogeneous)
+	maxVolumesPerNodeByLabelEnvName = "MAX_VOLUMES_PER_NODE_BY_LABEL"  // JSON: {labelValue: limit}
+	maxVolumesPerNodeLabelKeyEnv    = "MAX_VOLUMES_PER_NODE_LABEL_KEY" // node label key to look up
+	csiNodeNameEnvName              = "CSI_NODE_NAME"
+	podWatcherResyncPeriod          = time.Minute
+	scheme                          = runtime.NewScheme()
 )
 
 func init() {
@@ -165,12 +170,9 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 			dm.SetS3PACache(s3paCache)
 		}
 
-		maxVolumesPerNode, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
+		maxVolumesPerNode, err := resolveMaxVolumesPerNode(context.Background(), clientset)
 		if err != nil {
 			return nil, err
-		}
-		if maxVolumesPerNode < 0 {
-			return nil, fmt.Errorf("%s must be >= 0, got %d", maxVolumesPerNodeEnvName, maxVolumesPerNode)
 		}
 		if maxVolumesPerNode == 0 {
 			klog.Warningf("%s is 0: volume limit is disabled (unbounded). The scheduler will not "+
@@ -179,7 +181,7 @@ func NewDriver(endpoint string, mpVersion string, nodeID string) (*Driver, error
 				maxVolumesPerNodeEnvName)
 		}
 
-		nodeServer = node.NewS3NodeServer(nodeID, dm, int64(maxVolumesPerNode))
+		nodeServer = node.NewS3NodeServer(nodeID, dm, maxVolumesPerNode)
 	} else {
 		mpMounter := mpmounter.New()
 		podWatcher := watcher.New(clientset, mountpointPodNamespace, nodeID, podWatcherResyncPeriod)
@@ -273,6 +275,66 @@ func (d *Driver) Stop() {
 		d.stopCh = nil
 	}
 	d.Srv.Stop()
+}
+
+// resolveMaxVolumesPerNode determines this node's MaxVolumesPerNode.
+//
+//   - If MAX_VOLUMES_PER_NODE_BY_LABEL is set (heterogeneous), it parses the JSON map,
+//     reads this node's label value (key from MAX_VOLUMES_PER_NODE_LABEL_KEY) via the
+//     Kubernetes API, and returns the matching limit. FAILS CLOSED if the node's label
+//     value has no entry in the map, if the label key env is missing, if CSI_NODE_NAME
+//     is unset, or if the node cannot be fetched.
+//   - Otherwise falls back to the scalar MAX_VOLUMES_PER_NODE env (pre-feature behaviour).
+//
+// The returned value is validated to be >= 0. A value of 0 means "unbounded".
+func resolveMaxVolumesPerNode(ctx context.Context, clientset kubernetes.Interface) (int64, error) {
+	byLabel, hasMap := os.LookupEnv(maxVolumesPerNodeByLabelEnvName)
+	if !hasMap || strings.TrimSpace(byLabel) == "" || byLabel == "{}" {
+		// Scalar fallback: identical to pre-feature behaviour.
+		v, err := util.GetEnvAsInt(maxVolumesPerNodeEnvName)
+		if err != nil {
+			return 0, err
+		}
+		if v < 0 {
+			return 0, fmt.Errorf("%s must be >= 0, got %d", maxVolumesPerNodeEnvName, v)
+		}
+		return int64(v), nil
+	}
+
+	labelKey := os.Getenv(maxVolumesPerNodeLabelKeyEnv)
+	if labelKey == "" {
+		return 0, fmt.Errorf("%s is set but %s is empty", maxVolumesPerNodeByLabelEnvName, maxVolumesPerNodeLabelKeyEnv)
+	}
+
+	nodeName := os.Getenv(csiNodeNameEnvName)
+	if nodeName == "" {
+		return 0, fmt.Errorf("%s must be set to resolve per-node volume limit", csiNodeNameEnvName)
+	}
+
+	var limits map[string]int64
+	if err := json.Unmarshal([]byte(byLabel), &limits); err != nil {
+		return 0, fmt.Errorf("failed to parse %s %q: %w", maxVolumesPerNodeByLabelEnvName, byLabel, err)
+	}
+
+	n, err := clientset.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("failed to get node %q to resolve volume limit: %w", nodeName, err)
+	}
+
+	labelValue, ok := n.Labels[labelKey]
+	if !ok {
+		return 0, fmt.Errorf("node %q has no label %q; cannot resolve MaxVolumesPerNode", nodeName, labelKey)
+	}
+
+	limit, ok := limits[labelValue]
+	if !ok {
+		// FAIL CLOSED: no matching class → would advertise a wrong/unbounded limit.
+		return 0, fmt.Errorf("node %q label %s=%q matches no daemonsetMounters entry in %s", nodeName, labelKey, labelValue, maxVolumesPerNodeByLabelEnvName)
+	}
+	if limit < 0 {
+		return 0, fmt.Errorf("resolved MaxVolumesPerNode for %s=%q must be >= 0, got %d", labelKey, labelValue, limit)
+	}
+	return limit, nil
 }
 
 func kubernetesVersion(clientset *kubernetes.Clientset) (string, error) {

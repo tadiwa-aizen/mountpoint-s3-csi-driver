@@ -39,8 +39,20 @@ spec:
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
+      {{- if eq .Values.experimental.mounterMode "daemonset" }}
+      {{- $orAffinity := include "s3.nodeOrAffinity" . }}
+      {{- if $orAffinity | trim }}
+      affinity:
+        {{- $orAffinity | nindent 8 }}
+      {{- else }}
       {{- with .Values.node.affinity }}
       affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- end }}
+      {{- else }}
+      {{- with .Values.node.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- end }}
       tolerations:
         {{- if .Values.node.tolerateAllTaints }}
@@ -122,19 +134,22 @@ spec:
             - name: INSTALLATION_TYPE
               value: {{ if .Values.isEKSAddon }}eks-addon{{ else if .Values.isHelmRepo }}helm{{ else }}helm-dev{{ end }}
             {{- if eq .Values.experimental.mounterMode "daemonset" }}
-            {{- if ne (len .Values.daemonsetMounters) 1 }}
-            {{- fail "daemonsetMounters must have exactly one entry" }}
-            {{- end }}
-            {{- $mounter := index .Values.daemonsetMounters 0 }}
-            {{- if lt (int $mounter.maxVolumesPerNode) 0 }}
-            {{- fail "daemonsetMounters[].maxVolumesPerNode must be >= 0" }}
-            {{- end }}
+            {{- include "s3.validateMounters" . }}
+            {{- $multi := gt (len .Values.daemonsetMounters) 1 }}
+            {{- $first := index .Values.daemonsetMounters 0 }}
             - name: MOUNTER_MODE
               value: daemonset
             - name: MOUNTER_NAMESPACE
               value: {{ .Release.Namespace }}
+            # scalar fallback: always emitted for single-entry / homogeneous compatibility
             - name: MAX_VOLUMES_PER_NODE
-              value: "{{ $mounter.maxVolumesPerNode }}"
+              value: "{{ $first.maxVolumesPerNode }}"
+            {{- if $multi }}
+            - name: MAX_VOLUMES_PER_NODE_LABEL_KEY
+              value: {{ .Values.daemonsetMounterLabelKey | quote }}
+            - name: MAX_VOLUMES_PER_NODE_BY_LABEL
+              value: {{ include "s3.maxVolumesByLabelJSON" . | quote }}
+            {{- end }}
             {{- end }}
             {{- with .Values.awsAccessSecret }}
             - name: AWS_ACCESS_KEY_ID
