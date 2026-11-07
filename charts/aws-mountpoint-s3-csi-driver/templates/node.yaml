@@ -8,25 +8,22 @@ For (unsupported) development installation, please set the 'unsupportedDevInstal
 See https://github.com/awslabs/mountpoint-s3-csi-driver/issues/859 for more details.
 ` -}}
 {{- end -}}
-{{- $affinity := .Values.node.affinity }}
+{{- /* Option B prototype: one CSI node DaemonSet per mounter entry, placed by the same rules as that
+       entry's mounter, so there is no union. Pod mode keeps a single DaemonSet. */}}
+{{- $entries := list (dict) }}
 {{- if eq .Values.experimental.mounterMode "daemonset" }}
 {{- include "aws-mountpoint-s3-csi-driver.validateMounterEntries" . }}
-{{- /* The node pod runs wherever any entry's mounter runs: one node term per entry. */}}
-{{- $exprLists := list }}
-{{- range $m := .Values.daemonsetMounters }}
-{{- $exprs := list }}
-{{- range $k, $v := $m.nodeSelector }}
-{{- $exprs = append $exprs (dict "key" $k "operator" "In" "values" (list (toString $v))) }}
+{{- $entries = .Values.daemonsetMounters }}
 {{- end }}
-{{- $exprs = concat $exprs ($m.matchExpressions | default list) }}
-{{- if $exprs }}{{- $exprLists = append $exprLists $exprs }}{{- end }}
-{{- end }}
-{{- $affinity = include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
-{{- end }}
+{{- range $m := $entries }}
+{{- with $ }}
+{{- $exprLists := ternary (list $m.matchExpressions) (list) (not (empty $m.matchExpressions)) }}
+{{- $affinity := include "aws-mountpoint-s3-csi-driver.addToNodeTerms" (dict "affinity" .Values.node.affinity "exprLists" $exprLists) | fromYaml }}
+---
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
-  name: s3-csi-node
+  name: s3-csi-node{{ with $m.name }}-{{ . }}{{ end }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "aws-mountpoint-s3-csi-driver.labels" . | nindent 4 }}
@@ -51,6 +48,9 @@ spec:
         kubernetes.io/os: linux
         {{- with .Values.node.nodeSelector }}
         {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- range $k, $v := $m.nodeSelector }}
+        {{ $k }}: {{ toString $v | quote }}
         {{- end }}
       serviceAccountName: {{ .Values.node.serviceAccount.name }}
       priorityClassName: system-node-critical
@@ -252,3 +252,5 @@ spec:
         {{- with .Values.node.volumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+{{- end }}
+{{- end }}
